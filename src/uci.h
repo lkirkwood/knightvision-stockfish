@@ -19,8 +19,11 @@
 #ifndef UCI_H_INCLUDED
 #define UCI_H_INCLUDED
 
+#include <atomic>
 #include <cstdint>
 #include <iostream>
+#include <ostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -39,8 +42,11 @@ using Value = int;
 class UCIEngine {
    public:
     UCIEngine(int argc, char** argv);
+    UCIEngine(int argc, char** argv, std::ostream* bestmove_output);
 
-    void loop();
+    void        loop();
+    std::string run_cmd(std::string cmd);
+    void        await_bestmove();
 
     static int         to_cp(Value v, const Position& pos);
     static std::string format_score(const Score& s);
@@ -55,8 +61,9 @@ class UCIEngine {
     auto& engine_options() { return engine.get_options(); }
 
    private:
-    Engine      engine;
-    CommandLine cli;
+    Engine                   engine;
+    CommandLine              cli;
+    static std::atomic<bool> bestmove_consumed;
 
     static void print_info_string(std::string_view str);
 
@@ -70,9 +77,10 @@ class UCIEngine {
     static void on_update_no_moves(const Engine::InfoShort& info);
     static void on_update_full(const Engine::InfoFull& info, bool showWDL);
     static void on_iter(const Engine::InfoIter& info);
-    static void on_bestmove(std::string_view bestmove, std::string_view ponder);
+    static void
+    on_bestmove(std::string_view bestmove, std::string_view ponder, std::ostream* output);
 
-    void init_search_update_listeners();
+    void init_search_update_listeners(std::ostream* bestmove_output);
 };
 
 }  // namespace Stockfish

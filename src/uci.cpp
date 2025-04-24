@@ -32,6 +32,7 @@
 #include "benchmark.h"
 #include "engine.h"
 #include "memory.h"
+#include "misc.h"
 #include "movegen.h"
 #include "position.h"
 #include "score.h"
@@ -67,21 +68,34 @@ void UCIEngine::print_info_string(std::string_view str) {
 UCIEngine::UCIEngine(int argc, char** argv) :
     engine(argv[0]),
     cli(argc, argv) {
-
     engine.get_options().add_info_listener([](const std::optional<std::string>& str) {
         if (str.has_value())
             print_info_string(*str);
     });
 
-    init_search_update_listeners();
+    init_search_update_listeners(&std::cout);
 }
 
-void UCIEngine::init_search_update_listeners() {
+UCIEngine::UCIEngine(int argc, char** argv, std::ostream* bestmove_output) :
+    engine(argv[0]),
+    cli(argc, argv) {
+    engine.get_options().add_info_listener([](const std::optional<std::string>& str) {
+        if (str.has_value())
+            print_info_string(*str);
+    });
+
+    init_search_update_listeners(bestmove_output);
+}
+
+void UCIEngine::init_search_update_listeners(std::ostream* bestmove_output) {
     engine.set_on_iter([](const auto& i) { on_iter(i); });
     engine.set_on_update_no_moves([](const auto& i) { on_update_no_moves(i); });
     engine.set_on_update_full(
       [this](const auto& i) { on_update_full(i, engine.get_options()["UCI_ShowWDL"]); });
-    engine.set_on_bestmove([](const auto& bm, const auto& p) { on_bestmove(bm, p); });
+    engine.set_on_bestmove(
+      [bestmove_output](const std::string_view& bm, const std::string_view& p) {
+          on_bestmove(bm, p, bestmove_output);
+      });
     engine.set_on_verify_networks([](const auto& s) { print_info_string(s); });
 }
 
@@ -94,88 +108,99 @@ void UCIEngine::loop() {
     do
     {
         if (cli.argc == 1
-            && !getline(std::cin, cmd))  // Wait for an input or an end-of-file (EOF) indication
+            && !getline(std::cin,
+                        cmd))  // Wait for an input or an end-of-file (EOF) indication
             cmd = "quit";
 
-        std::istringstream is(cmd);
-
-        token.clear();  // Avoid a stale if getline() returns nothing or a blank line
-        is >> std::skipws >> token;
-
-        if (token == "quit" || token == "stop")
-            engine.stop();
-
-        // The GUI sends 'ponderhit' to tell that the user has played the expected move.
-        // So, 'ponderhit' is sent if pondering was done on the same move that the user
-        // has played. The search should continue, but should also switch from pondering
-        // to the normal search.
-        else if (token == "ponderhit")
-            engine.set_ponderhit(false);
-
-        else if (token == "uci")
-        {
-            sync_cout << "id name " << engine_info(true) << "\n"
-                      << engine.get_options() << sync_endl;
-
-            sync_cout << "uciok" << sync_endl;
-        }
-
-        else if (token == "setoption")
-            setoption(is);
-        else if (token == "go")
-        {
-            // send info strings after the go command is sent for old GUIs and python-chess
-            print_info_string(engine.numa_config_information_as_string());
-            print_info_string(engine.thread_allocation_information_as_string());
-            go(is);
-        }
-        else if (token == "position")
-            position(is);
-        else if (token == "ucinewgame")
-            engine.search_clear();
-        else if (token == "isready")
-            sync_cout << "readyok" << sync_endl;
-
-        // Add custom non-UCI commands, mainly for debugging purposes.
-        // These commands must not be used during a search!
-        else if (token == "flip")
-            engine.flip();
-        else if (token == "bench")
-            bench(is);
-        else if (token == BenchmarkCommand)
-            benchmark(is);
-        else if (token == "d")
-            sync_cout << engine.visualize() << sync_endl;
-        else if (token == "eval")
-            engine.trace_eval();
-        else if (token == "compiler")
-            sync_cout << compiler_info() << sync_endl;
-        else if (token == "export_net")
-        {
-            std::pair<std::optional<std::string>, std::string> files[2];
-
-            if (is >> std::skipws >> files[0].second)
-                files[0].first = files[0].second;
-
-            if (is >> std::skipws >> files[1].second)
-                files[1].first = files[1].second;
-
-            engine.save_network(files);
-        }
-        else if (token == "--help" || token == "help" || token == "--license" || token == "license")
-            sync_cout
-              << "\nStockfish is a powerful chess engine for playing and analyzing."
-                 "\nIt is released as free software licensed under the GNU GPLv3 License."
-                 "\nStockfish is normally used with a graphical user interface (GUI) and implements"
-                 "\nthe Universal Chess Interface (UCI) protocol to communicate with a GUI, an API, etc."
-                 "\nFor any further information, visit https://github.com/official-stockfish/Stockfish#readme"
-                 "\nor read the corresponding README.md and Copying.txt files distributed along with this program.\n"
-              << sync_endl;
-        else if (!token.empty() && token[0] != '#')
-            sync_cout << "Unknown command: '" << cmd << "'. Type help for more information."
-                      << sync_endl;
-
+        token = run_cmd(cmd);
     } while (token != "quit" && cli.argc == 1);  // The command-line arguments are one-shot
+}
+
+std::string UCIEngine::run_cmd(std::string cmd) {
+    std::string        token;
+    std::istringstream is(cmd);
+
+    token.clear();  // Avoid a stale if getline() returns nothing or a blank line
+    is >> std::skipws >> token;
+
+    if (token == "quit" || token == "stop")
+        engine.stop();
+
+    // The GUI sends 'ponderhit' to tell that the user has played the expected
+    // move. So, 'ponderhit' is sent if pondering was done on the same move that
+    // the user has played. The search should continue, but should also switch
+    // from pondering to the normal search.
+    else if (token == "ponderhit")
+        engine.set_ponderhit(false);
+
+    else if (token == "uci")
+    {
+        sync_cout << "id name " << engine_info(true) << "\n" << engine.get_options() << sync_endl;
+
+        sync_cout << "uciok" << sync_endl;
+    }
+
+    else if (token == "setoption")
+        setoption(is);
+    else if (token == "go")
+    {
+        // send info strings after the go command is sent for old GUIs and
+        // python-chess
+        print_info_string(engine.numa_config_information_as_string());
+        print_info_string(engine.thread_allocation_information_as_string());
+        go(is);
+    }
+    else if (token == "position")
+        position(is);
+    else if (token == "ucinewgame")
+        engine.search_clear();
+    else if (token == "isready")
+        sync_cout << "readyok" << sync_endl;
+
+    // Add custom non-UCI commands, mainly for debugging purposes.
+    // These commands must not be used during a search!
+    else if (token == "flip")
+        engine.flip();
+    else if (token == "bench")
+        bench(is);
+    else if (token == BenchmarkCommand)
+        benchmark(is);
+    else if (token == "d")
+        sync_cout << engine.visualize() << sync_endl;
+    else if (token == "eval")
+        engine.trace_eval();
+    else if (token == "compiler")
+        sync_cout << compiler_info() << sync_endl;
+    else if (token == "export_net")
+    {
+        std::pair<std::optional<std::string>, std::string> files[2];
+
+        if (is >> std::skipws >> files[0].second)
+            files[0].first = files[0].second;
+
+        if (is >> std::skipws >> files[1].second)
+            files[1].first = files[1].second;
+
+        engine.save_network(files);
+    }
+    else if (token == "--help" || token == "help" || token == "--license" || token == "license")
+        sync_cout << "\nStockfish is a powerful chess engine for playing and analyzing."
+                     "\nIt is released as free software licensed under the GNU GPLv3 "
+                     "License."
+                     "\nStockfish is normally used with a graphical user interface (GUI) "
+                     "and implements"
+                     "\nthe Universal Chess Interface (UCI) protocol to communicate with "
+                     "a GUI, an API, etc."
+                     "\nFor any further information, visit "
+                     "https://github.com/official-stockfish/Stockfish#readme"
+                     "\nor read the corresponding README.md and Copying.txt files "
+                     "distributed along with this program.\n"
+                  << sync_endl;
+    else if (!token.empty() && token[0] != '#')
+        sync_cout << "Unknown command: '" << cmd << "'. Type help for more information."
+                  << sync_endl;
+
+    return token;
 }
 
 Search::LimitsType UCIEngine::parse_limits(std::istream& is) {
@@ -297,7 +322,8 @@ void UCIEngine::bench(std::istream& args) {
 }
 
 void UCIEngine::benchmark(std::istream& args) {
-    // Probably not very important for a test this long, but include for completeness and sanity.
+    // Probably not very important for a test this long, but include for
+    // completeness and sanity.
     static constexpr int NUM_WARMUP_POSITIONS = 3;
 
     std::string token;
@@ -423,9 +449,9 @@ void UCIEngine::benchmark(std::istream& args) {
 
     std::cerr << "\n";
 
-    static_assert(
-      std::size(hashfullAges) == 2 && hashfullAges[0] == 0 && hashfullAges[1] == 999,
-      "Hardcoded for display. Would complicate the code needlessly in the current state.");
+    static_assert(std::size(hashfullAges) == 2 && hashfullAges[0] == 0 && hashfullAges[1] == 999,
+                  "Hardcoded for display. Would complicate the code needlessly "
+                  "in the current state.");
 
     std::string threadBinding = engine.thread_binding_information_as_string();
     if (threadBinding.empty())
@@ -457,7 +483,7 @@ void UCIEngine::benchmark(std::istream& args) {
 
     // clang-format on
 
-    init_search_update_listeners();
+    init_search_update_listeners(&std::cout);
 }
 
 void UCIEngine::setoption(std::istringstream& is) {
@@ -509,10 +535,12 @@ WinRateParams win_rate_params(const Position& pos) {
     int material = pos.count<PAWN>() + 3 * pos.count<KNIGHT>() + 3 * pos.count<BISHOP>()
                  + 5 * pos.count<ROOK>() + 9 * pos.count<QUEEN>();
 
-    // The fitted model only uses data for material counts in [17, 78], and is anchored at count 58.
+    // The fitted model only uses data for material counts in [17, 78], and is
+    // anchored at count 58.
     double m = std::clamp(material, 17, 78) / 58.0;
 
-    // Return a = p_a(material) and b = p_b(material), see github.com/official-stockfish/WDL_model
+    // Return a = p_a(material) and b = p_b(material), see
+    // github.com/official-stockfish/WDL_model
     constexpr double as[] = {-13.50030198, 40.92780883, -36.82753545, 386.83004070};
     constexpr double bs[] = {96.53354896, -165.79058388, 90.89679019, 49.29561889};
 
@@ -522,8 +550,8 @@ WinRateParams win_rate_params(const Position& pos) {
     return {a, b};
 }
 
-// The win rate model is 1 / (1 + exp((a - eval) / b)), where a = p_a(material) and b = p_b(material).
-// It fits the LTC fishtest statistics rather accurately.
+// The win rate model is 1 / (1 + exp((a - eval) / b)), where a = p_a(material)
+// and b = p_b(material). It fits the LTC fishtest statistics rather accurately.
 int win_rate_model(Value v, const Position& pos) {
 
     auto [a, b] = win_rate_params(pos);
@@ -531,7 +559,7 @@ int win_rate_model(Value v, const Position& pos) {
     // Return the win rate in per mille units, rounded to the nearest integer.
     return int(0.5 + 1000 / (1 + std::exp((a - double(v)) / b)));
 }
-}
+}  // namespace
 
 std::string UCIEngine::format_score(const Score& s) {
     constexpr int TB_CP = 20000;
@@ -600,7 +628,6 @@ std::string UCIEngine::move(Move m, bool chess960) {
     return move;
 }
 
-
 std::string UCIEngine::to_lower(std::string str) {
     std::transform(str.begin(), str.end(), str.begin(), [](auto c) { return std::tolower(c); });
 
@@ -657,11 +684,22 @@ void UCIEngine::on_iter(const Engine::InfoIter& info) {
     sync_cout << ss.str() << sync_endl;
 }
 
-void UCIEngine::on_bestmove(std::string_view bestmove, std::string_view ponder) {
-    sync_cout << "bestmove " << bestmove;
+void UCIEngine::on_bestmove(std::string_view bestmove,
+                            std::string_view ponder,
+                            std::ostream*    output) {
+    *output << IO_LOCK << "bestmove " << bestmove;
     if (!ponder.empty())
-        std::cout << " ponder " << ponder;
-    std::cout << sync_endl;
+        *output << " ponder " << ponder;
+    *output << sync_endl;
+    bestmove_consumed = false;
+}
+
+std::atomic<bool> UCIEngine::bestmove_consumed = true;
+
+void UCIEngine::await_bestmove() {
+    while (bestmove_consumed)
+    {}
+    bestmove_consumed = true;
 }
 
 }  // namespace Stockfish
