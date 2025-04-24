@@ -32,6 +32,7 @@
 #include "benchmark.h"
 #include "engine.h"
 #include "memory.h"
+#include "misc.h"
 #include "movegen.h"
 #include "position.h"
 #include "score.h"
@@ -72,15 +73,29 @@ UCIEngine::UCIEngine(int argc, char** argv) :
             print_info_string(*str);
     });
 
-    init_search_update_listeners();
+    init_search_update_listeners(&std::cout);
 }
 
-void UCIEngine::init_search_update_listeners() {
+UCIEngine::UCIEngine(int argc, char** argv, std::ostream* bestmove_output) :
+    engine(argv[0]),
+    cli(argc, argv) {
+    engine.get_options().add_info_listener([](const std::optional<std::string>& str) {
+        if (str.has_value())
+            print_info_string(*str);
+    });
+
+    init_search_update_listeners(bestmove_output);
+}
+
+void UCIEngine::init_search_update_listeners(std::ostream* bestmove_output) {
     engine.set_on_iter([](const auto& i) { on_iter(i); });
     engine.set_on_update_no_moves([](const auto& i) { on_update_no_moves(i); });
     engine.set_on_update_full(
       [this](const auto& i) { on_update_full(i, engine.get_options()["UCI_ShowWDL"]); });
-    engine.set_on_bestmove([](const auto& bm, const auto& p) { on_bestmove(bm, p); });
+    engine.set_on_bestmove(
+      [bestmove_output](const std::string_view& bm, const std::string_view& p) {
+          on_bestmove(bm, p, bestmove_output);
+      });
     engine.set_on_verify_networks([](const auto& s) { print_info_string(s); });
 }
 
@@ -468,7 +483,7 @@ void UCIEngine::benchmark(std::istream& args) {
 
     // clang-format on
 
-    init_search_update_listeners();
+    init_search_update_listeners(&std::cout);
 }
 
 void UCIEngine::setoption(std::istringstream& is) {
@@ -669,11 +684,22 @@ void UCIEngine::on_iter(const Engine::InfoIter& info) {
     sync_cout << ss.str() << sync_endl;
 }
 
-void UCIEngine::on_bestmove(std::string_view bestmove, std::string_view ponder) {
-    sync_cout << "bestmove " << bestmove;
+void UCIEngine::on_bestmove(std::string_view bestmove,
+                            std::string_view ponder,
+                            std::ostream*    output) {
+    *output << IO_LOCK << "bestmove " << bestmove;
     if (!ponder.empty())
-        std::cout << " ponder " << ponder;
-    std::cout << sync_endl;
+        *output << " ponder " << ponder;
+    *output << sync_endl;
+    bestmove_consumed = false;
+}
+
+std::atomic<bool> UCIEngine::bestmove_consumed = true;
+
+void UCIEngine::await_bestmove() {
+    while (bestmove_consumed)
+    {}
+    bestmove_consumed = true;
 }
 
 }  // namespace Stockfish
