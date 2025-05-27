@@ -78,6 +78,22 @@ JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_runCmd(JNIEnv* e
     return env->NewStringUTF(output.c_str());
 }
 
+JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_goBlocking(
+  JNIEnv* env, jobject, jlong _uci, jlong _bestmove_output, jint depth) {
+    Stockfish::UCIEngine* uci             = reinterpret_cast<Stockfish::UCIEngine*>(_uci);
+    std::ostringstream*   bestmove_output = reinterpret_cast<std::ostringstream*>(_bestmove_output);
+
+    std::function<void()> run_cmd = [&]() {
+        uci->run_cmd("go depth " + std::to_string(depth));
+        uci->wait_for_search();
+    };
+
+    std::string output = capture_stdout(run_cmd);
+    uci->await_bestmove();
+
+    return env->NewStringUTF((output + "\n" + bestmove_output->str()).c_str());
+}
+
 JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_bestmove(JNIEnv* env,
                                                                          jobject,
                                                                          jlong _uci,
