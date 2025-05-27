@@ -46,6 +46,7 @@ class UCIEngine {
 
     void        loop();
     std::string run_cmd(std::string cmd);
+    void        wait_for_search();
     void        await_bestmove();
 
     static int         to_cp(Value v, const Position& pos);

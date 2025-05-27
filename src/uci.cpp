@@ -203,6 +203,8 @@ std::string UCIEngine::run_cmd(std::string cmd) {
     return token;
 }
 
+void UCIEngine::wait_for_search() { engine.wait_for_search_finished(); }
+
 Search::LimitsType UCIEngine::parse_limits(std::istream& is) {
     Search::LimitsType limits;
     std::string        token;
