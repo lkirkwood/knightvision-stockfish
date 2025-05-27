@@ -38,27 +38,17 @@ const std::string capture_stdout(const std::function<void()>& func) {
 }
 
 extern "C" {
-JNIEXPORT jlongArray JNICALL Java_com_knightvision_StockfishBridge__1initEngine(JNIEnv* env,
-                                                                                jobject) {
+JNIEXPORT jlong JNICALL Java_com_knightvision_StockfishBridge__1initEngine(JNIEnv* env, jobject) {
     Stockfish::Bitboards::init();
     Stockfish::Position::init();
 
-    char                progname[]      = "stockfish";
-    char*               argv[]          = {progname, nullptr};
-    std::ostringstream* bestmove_output = new std::ostringstream();
-    auto                uci             = new Stockfish::UCIEngine(1, argv, bestmove_output);
+    char  progname[] = "stockfish";
+    char* argv[]     = {progname, nullptr};
+    auto  uci        = new Stockfish::UCIEngine(1, argv);
 
     Stockfish::Tune::init(uci->engine_options());
 
-    jlong native_ptr_array[] = {reinterpret_cast<jlong>(uci),
-                                reinterpret_cast<jlong>(bestmove_output)};
-
-    jlongArray jni_ptr_array = env->NewLongArray(2);
-    if (NULL == jni_ptr_array)
-        return NULL;
-
-    env->SetLongArrayRegion(jni_ptr_array, 0, 2, native_ptr_array);
-    return jni_ptr_array;
+    return reinterpret_cast<jlong>(uci);
 }
 
 JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_runCmd(JNIEnv* env,
@@ -78,10 +68,11 @@ JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_runCmd(JNIEnv* e
     return env->NewStringUTF(output.c_str());
 }
 
-JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_goBlocking(
-  JNIEnv* env, jobject, jlong _uci, jlong _bestmove_output, jint depth) {
-    Stockfish::UCIEngine* uci             = reinterpret_cast<Stockfish::UCIEngine*>(_uci);
-    std::ostringstream*   bestmove_output = reinterpret_cast<std::ostringstream*>(_bestmove_output);
+JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_goBlocking(JNIEnv* env,
+                                                                           jobject,
+                                                                           jlong _uci,
+                                                                           jint  depth) {
+    Stockfish::UCIEngine* uci = reinterpret_cast<Stockfish::UCIEngine*>(_uci);
 
     std::function<void()> run_cmd = [&]() {
         uci->run_cmd("go depth " + std::to_string(depth));
@@ -89,21 +80,20 @@ JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_goBlocking(
     };
 
     std::string output = capture_stdout(run_cmd);
-    uci->await_bestmove();
 
-    return env->NewStringUTF((output + "\n" + bestmove_output->str()).c_str());
+    return env->NewStringUTF(output.c_str());
 }
 
-JNIEXPORT jstring JNICALL Java_com_knightvision_StockfishBridge_bestmove(JNIEnv* env,
-                                                                         jobject,
-                                                                         jlong _uci,
-                                                                         jlong _bestmove_output) {
-    Stockfish::UCIEngine* uci             = reinterpret_cast<Stockfish::UCIEngine*>(_uci);
-    std::ostringstream*   bestmove_output = reinterpret_cast<std::ostringstream*>(_bestmove_output);
+JNIEXPORT jboolean JNICALL Java_com_knightvision_StockfishBridge_validFen(JNIEnv* env,
+                                                                          jobject,
+                                                                          jstring fen_jstring) {
 
-    uci->run_cmd("stop");
-    uci->await_bestmove();
-
-    return env->NewStringUTF(bestmove_output->str().c_str());
+    const char* fen_utf8 = env->GetStringUTFChars(fen_jstring, nullptr);
+    std::string fen(fen_utf8);
+    env->ReleaseStringUTFChars(fen_jstring, fen_utf8);
+    Stockfish::Position  pos;
+    Stockfish::StateInfo st;
+    pos.set(fen, false, &st);
+    return static_cast<jboolean>(pos.pos_is_ok());
 }
 }
