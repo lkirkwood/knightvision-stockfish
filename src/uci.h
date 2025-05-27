@@ -42,7 +42,6 @@ using Value = int;
 class UCIEngine {
    public:
     UCIEngine(int argc, char** argv);
-    UCIEngine(int argc, char** argv, std::ostream* bestmove_output);
 
     void        loop();
     std::string run_cmd(std::string cmd);
@@ -78,10 +77,9 @@ class UCIEngine {
     static void on_update_no_moves(const Engine::InfoShort& info);
     static void on_update_full(const Engine::InfoFull& info, bool showWDL);
     static void on_iter(const Engine::InfoIter& info);
-    static void
-    on_bestmove(std::string_view bestmove, std::string_view ponder, std::ostream* output);
+    static void on_bestmove(std::string_view bestmove, std::string_view ponder);
 
-    void init_search_update_listeners(std::ostream* bestmove_output);
+    void init_search_update_listeners();
 };
 
 }  // namespace Stockfish
