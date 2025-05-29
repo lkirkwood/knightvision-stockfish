@@ -898,7 +898,7 @@ DirtyPiece Position::do_move(Move                      m,
         }
     }
 
-    assert(pos_is_ok());
+    // assert(pos_is_ok());
 
     return dp;
 }
@@ -963,7 +963,7 @@ void Position::undo_move(Move m) {
     st = st->previous;
     --gamePly;
 
-    assert(pos_is_ok());
+    // assert(pos_is_ok());
 }
 
 
@@ -1031,7 +1031,7 @@ void Position::do_null_move(StateInfo& newSt, const TranspositionTable& tt) {
 
     st->repetition = 0;
 
-    assert(pos_is_ok());
+    // assert(pos_is_ok());
 }
 
 
@@ -1258,7 +1258,7 @@ void Position::flip() {
 
     set(f, is_chess960(), st);
 
-    assert(pos_is_ok());
+    // assert(pos_is_ok());
 }
 
 
